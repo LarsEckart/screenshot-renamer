@@ -1,5 +1,7 @@
 #!/usr/bin/env bun
 
+const VERSION = "1.1.0";
+
 import { appendFile, mkdir, readdir, readFile, rename, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, extname, join } from "node:path";
@@ -7,7 +9,7 @@ import Anthropic from "@anthropic-ai/sdk";
 
 const SUPPORTED_EXTENSIONS = [".png"];
 const SCREENSHOTS_DIR = import.meta.dir;
-const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
+const DEFAULT_DAYS = 7;
 const HISTORY_FILE = join(homedir(), ".config", "screenshot-renamer", "history.txt");
 
 async function logRename(oldPath: string, newPath: string): Promise<void> {
@@ -29,17 +31,27 @@ async function getImageMediaType(ext: string): Promise<"image/png"> {
 const MACOS_SCREENSHOT_PATTERN =
   /^Screenshot (\d{4}-\d{2}-\d{2}) at (\d{1,2})\.(\d{2})\.\d{2}/;
 
-function isMacOSScreenshot(filename: string): boolean {
+export function isMacOSScreenshot(filename: string): boolean {
   return MACOS_SCREENSHOT_PATTERN.test(filename);
 }
 
-function getDateTimePrefix(filename: string): string {
+export function getDateTimePrefix(filename: string): string {
   const match = filename.match(MACOS_SCREENSHOT_PATTERN);
   if (!match) throw new Error(`Not a macOS screenshot: ${filename}`);
   const date = match[1]!;
   const hour = match[2]!.padStart(2, "0");
   const minute = match[3]!;
   return `${date}-${hour}-${minute}`;
+}
+
+export function sanitizeFilename(name: string): string {
+  return name
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9-]/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "")
+    .slice(0, 50);
 }
 
 async function suggestName(imagePath: string): Promise<string | null> {
@@ -81,36 +93,30 @@ Reply with ONLY the suggested filename, nothing else.`,
 
   const textBlock = response.content.find((block) => block.type === "text");
   if (textBlock && textBlock.type === "text") {
-    // Sanitize: remove any chars that aren't alphanumeric or hyphens
-    return textBlock.text
-      .trim()
-      .toLowerCase()
-      .replace(/[^a-z0-9-]/g, "-")
-      .replace(/-+/g, "-")
-      .replace(/^-|-$/g, "")
-      .slice(0, 50);
+    return sanitizeFilename(textBlock.text);
   }
   return null;
 }
 
-async function isRecentFile(filePath: string): Promise<boolean> {
+async function isRecentFile(filePath: string, maxDaysOld: number): Promise<boolean> {
   const stats = await stat(filePath);
   const createdAt = stats.birthtime.getTime();
   const now = Date.now();
-  return now - createdAt <= SEVEN_DAYS_MS;
+  const maxAgeMs = maxDaysOld * 24 * 60 * 60 * 1000;
+  return now - createdAt <= maxAgeMs;
 }
 
-async function processScreenshots(directory: string, dryRun = false) {
+async function processScreenshots(directory: string, dryRun = false, days = DEFAULT_DAYS) {
   const files = await readdir(directory);
   const candidates = files.filter((f) => {
     const ext = extname(f).toLowerCase();
     return SUPPORTED_EXTENSIONS.includes(ext) && isMacOSScreenshot(f);
   });
 
-  // Filter to only files created in the last 7 days
+  // Filter to only files created within the specified number of days
   const images: string[] = [];
   for (const f of candidates) {
-    if (await isRecentFile(join(directory, f))) {
+    if (await isRecentFile(join(directory, f), days)) {
       images.push(f);
     }
   }
@@ -172,42 +178,71 @@ async function processScreenshots(directory: string, dryRun = false) {
   }
 }
 
-// CLI
-const args = process.argv.slice(2);
-const dryRun = args.includes("--dry-run") || args.includes("-n");
+// CLI - only run when executed directly
+if (import.meta.main) {
+  const args = process.argv.slice(2);
+  const dryRun = args.includes("--dry-run") || args.includes("-n");
 
-// Parse folder argument (first non-flag argument)
-const folderArg = args.find(arg => !arg.startsWith("-"));
-const targetDir = folderArg ? folderArg : SCREENSHOTS_DIR;
+  // Parse --days flag
+  let days = DEFAULT_DAYS;
+  const daysIndex = args.findIndex(arg => arg === "--days" || arg === "-d");
+  if (daysIndex !== -1 && args[daysIndex + 1]) {
+    const parsedDays = parseInt(args[daysIndex + 1], 10);
+    if (isNaN(parsedDays) || parsedDays < 1) {
+      console.error("❌ --days must be a positive integer");
+      process.exit(1);
+    }
+    days = parsedDays;
+  }
 
-if (args.includes("--help") || args.includes("-h")) {
-  console.log(`
-Screenshot Renamer - Uses Claude Vision to give screenshots descriptive names
+  // Parse folder argument (first non-flag argument, excluding --days value)
+  const flagsWithValues = new Set(["--days", "-d"]);
+  const folderArg = args.find((arg, i) => {
+    if (arg.startsWith("-")) return false;
+    // Check if previous arg was a flag that takes a value
+    const prevArg = args[i - 1];
+    if (prevArg && flagsWithValues.has(prevArg)) return false;
+    return true;
+  });
+  const targetDir = folderArg ? folderArg : SCREENSHOTS_DIR;
 
-Usage: bun rename-screenshots.ts [options] [folder]
+  if (args.includes("--version") || args.includes("-v")) {
+    console.log(`screenshot-renamer ${VERSION}`);
+    process.exit(0);
+  }
+
+  if (args.includes("--help") || args.includes("-h")) {
+    console.log(`
+Screenshot Renamer v${VERSION} - Uses Claude Vision to give screenshots descriptive names
+
+Usage: screenshot-renamer [options] [folder]
 
 Arguments:
-  folder           Directory to process (default: current script directory)
+  folder              Directory to process (default: current directory)
 
 Options:
-  --dry-run, -n    Show what would be renamed without making changes
-  --help, -h       Show this help message
+  --days <n>, -d <n>  Only process screenshots from the last n days (default: ${DEFAULT_DAYS})
+  --dry-run, -n       Show what would be renamed without making changes
+  --version, -v       Show version number
+  --help, -h          Show this help message
 
 Environment:
   ANTHROPIC_API_KEY    Required: Your Anthropic API key
 `);
-  process.exit(0);
-}
+    process.exit(0);
+  }
 
-if (!process.env.ANTHROPIC_API_KEY) {
-  console.error("❌ ANTHROPIC_API_KEY environment variable is required");
-  process.exit(1);
-}
+  if (!process.env.ANTHROPIC_API_KEY) {
+    console.error("❌ ANTHROPIC_API_KEY environment variable is required");
+    process.exit(1);
+  }
 
-console.log(
-  dryRun
-    ? "🔍 DRY RUN MODE - no files will be renamed\n"
-    : "🚀 Starting screenshot renamer...\n",
-);
-console.log(`📁 Target directory: ${targetDir}\n`);
-processScreenshots(targetDir, dryRun);
+  console.log(
+    dryRun
+      ? "🔍 DRY RUN MODE - no files will be renamed\n"
+      : "🚀 Starting screenshot renamer...\n",
+  );
+  console.log(`📁 Target directory: ${targetDir}`);
+  console.log(`📅 Looking back: ${days} day${days === 1 ? "" : "s"}\n`);
+  processScreenshots(targetDir, dryRun, days);
+}
