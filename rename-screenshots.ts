@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 
-const VERSION = "1.1.0";
+const VERSION = "1.1.1";
 
 import { appendFile, mkdir, readdir, readFile, rename, stat } from "node:fs/promises";
 import { homedir } from "node:os";
@@ -8,7 +8,7 @@ import { dirname, extname, join } from "node:path";
 import Anthropic from "@anthropic-ai/sdk";
 
 const SUPPORTED_EXTENSIONS = [".png"];
-const SCREENSHOTS_DIR = import.meta.dir;
+const SCREENSHOTS_DIR = process.cwd();
 const DEFAULT_DAYS = 7;
 const HISTORY_FILE = join(homedir(), ".config", "screenshot-renamer", "history.txt");
 
