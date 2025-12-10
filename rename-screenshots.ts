@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 
-const VERSION = "1.1.1";
+const VERSION = "1.1.2";
 
 import { appendFile, mkdir, readdir, readFile, rename, stat } from "node:fs/promises";
 import { homedir } from "node:os";
@@ -239,8 +239,8 @@ Environment:
 
   console.log(
     dryRun
-      ? "🔍 DRY RUN MODE - no files will be renamed\n"
-      : "🚀 Starting screenshot renamer...\n",
+      ? `🔍 DRY RUN MODE v${VERSION} - no files will be renamed\n`
+      : `🚀 Starting screenshot renamer v${VERSION}...\n`,
   );
   console.log(`📁 Target directory: ${targetDir}`);
   console.log(`📅 Looking back: ${days} day${days === 1 ? "" : "s"}\n`);
