@@ -1,7 +1,6 @@
 #!/bin/bash
 set -e
 
-BINARY_NAME="screenshot-renamer"
 INSTALL_DIR="$HOME/.local/bin"
 
 # Colors for output
@@ -12,11 +11,16 @@ NC='\033[0m' # No Color
 
 # Uninstall mode
 if [[ "$1" == "--uninstall" ]]; then
-    if [[ -f "$INSTALL_DIR/$BINARY_NAME" ]]; then
-        rm "$INSTALL_DIR/$BINARY_NAME"
-        echo -e "${GREEN}✓ Uninstalled $BINARY_NAME from $INSTALL_DIR${NC}"
-    else
-        echo -e "${YELLOW}$BINARY_NAME is not installed at $INSTALL_DIR${NC}"
+    removed=0
+    for binary in screenshot-renamer image-renamer; do
+        if [[ -f "$INSTALL_DIR/$binary" ]]; then
+            rm "$INSTALL_DIR/$binary"
+            echo -e "${GREEN}✓ Uninstalled $binary from $INSTALL_DIR${NC}"
+            removed=1
+        fi
+    done
+    if [[ $removed -eq 0 ]]; then
+        echo -e "${YELLOW}No binaries found at $INSTALL_DIR${NC}"
     fi
     exit 0
 fi
@@ -35,14 +39,17 @@ echo "📦 Installing dependencies..."
 cd "$SCRIPT_DIR"
 bun install
 
-echo "🔨 Building native binary..."
-bun build --compile --minify rename-screenshots.ts --outfile "$BINARY_NAME"
+echo "🔨 Building native binaries..."
+bun build --compile --minify rename-screenshots.ts --outfile screenshot-renamer
+bun build --compile --minify image-renamer.ts --outfile image-renamer
 
 echo "📁 Installing to $INSTALL_DIR..."
 mkdir -p "$INSTALL_DIR"
-mv "$BINARY_NAME" "$INSTALL_DIR/"
+mv screenshot-renamer "$INSTALL_DIR/"
+mv image-renamer "$INSTALL_DIR/"
 
-echo -e "${GREEN}✓ Installed $BINARY_NAME to $INSTALL_DIR${NC}"
+echo -e "${GREEN}✓ Installed screenshot-renamer to $INSTALL_DIR${NC}"
+echo -e "${GREEN}✓ Installed image-renamer to $INSTALL_DIR${NC}"
 
 # Check if INSTALL_DIR is in PATH
 if [[ ":$PATH:" != *":$INSTALL_DIR:"* ]]; then
@@ -56,6 +63,8 @@ if [[ ":$PATH:" != *":$INSTALL_DIR:"* ]]; then
 fi
 
 echo ""
-echo "Usage: $BINARY_NAME [--dry-run] [folder]"
+echo "Usage:"
+echo "  screenshot-renamer [--dry-run] [--days N] [folder]"
+echo "  image-renamer [--dry-run] <image-file>"
 echo ""
 echo "Don't forget to set your ANTHROPIC_API_KEY environment variable!"
