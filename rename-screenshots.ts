@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 
-const VERSION = "1.1.2";
+const VERSION = "1.1.3";
 
 import { appendFile, mkdir, readdir, readFile, rename, stat } from "node:fs/promises";
 import { homedir } from "node:os";
@@ -20,6 +20,16 @@ async function logRename(oldPath: string, newPath: string): Promise<void> {
 }
 
 const client = new Anthropic();
+
+export function formatErrorMessage(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error);
+  // Try to extract nested API error message from JSON
+  const jsonMatch = message.match(/\{.*"message"\s*:\s*"([^"]+)".*\}/);
+  if (jsonMatch?.[1]) {
+    return jsonMatch[1];
+  }
+  return message;
+}
 
 async function getImageMediaType(ext: string): Promise<"image/png"> {
   const types: Record<string, "image/png"> = {
@@ -169,11 +179,7 @@ async function processScreenshots(directory: string, dryRun = false, days = DEFA
         console.log(`   ✅ Renamed to: ${finalName}\n`);
       }
     } catch (error) {
-      console.error(
-        `   ❌ Error:`,
-        error instanceof Error ? error.message : error,
-        "\n",
-      );
+      console.error(`   ❌ Error: ${formatErrorMessage(error)}\n`);
     }
   }
 }

@@ -1,5 +1,5 @@
 import { test, expect, describe } from "bun:test";
-import { isMacOSScreenshot, getDateTimePrefix, sanitizeFilename } from "./rename-screenshots";
+import { isMacOSScreenshot, getDateTimePrefix, sanitizeFilename, formatErrorMessage } from "./rename-screenshots";
 
 describe("isMacOSScreenshot", () => {
   test("recognizes valid macOS screenshot patterns", () => {
@@ -76,5 +76,28 @@ describe("sanitizeFilename", () => {
   test("preserves numbers", () => {
     expect(sanitizeFilename("version-2-release")).toBe("version-2-release");
     expect(sanitizeFilename("2024-12-10")).toBe("2024-12-10");
+  });
+});
+
+describe("formatErrorMessage", () => {
+  test("extracts message from Anthropic API error JSON", () => {
+    const apiError = '400 {"type":"error","error":{"type":"invalid_request_error","message":"image exceeds 5 MB maximum: 6091236 bytes > 5242880 bytes"},"request_id":"req_011CW8NDq2wpQ8iSooRPCrfD"}';
+    expect(formatErrorMessage(new Error(apiError))).toBe("image exceeds 5 MB maximum: 6091236 bytes > 5242880 bytes");
+  });
+
+  test("returns plain message if no JSON found", () => {
+    expect(formatErrorMessage(new Error("Network timeout"))).toBe("Network timeout");
+    expect(formatErrorMessage(new Error("File not found"))).toBe("File not found");
+  });
+
+  test("handles non-Error values", () => {
+    expect(formatErrorMessage("string error")).toBe("string error");
+    expect(formatErrorMessage(42)).toBe("42");
+    expect(formatErrorMessage(null)).toBe("null");
+  });
+
+  test("extracts message from other JSON error formats", () => {
+    const otherError = '{"error": {"message": "Rate limit exceeded"}}';
+    expect(formatErrorMessage(new Error(otherError))).toBe("Rate limit exceeded");
   });
 });
