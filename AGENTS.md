@@ -9,6 +9,7 @@ alwaysApply: false
 The version is defined in `rename-screenshots.ts` as `const VERSION = "X.Y.Z"`.
 
 When making changes, consider whether to increment the version:
+
 - **Patch (0.0.X)**: Bug fixes, minor tweaks
 - **Minor (0.X.0)**: New features, non-breaking changes
 - **Major (X.0.0)**: Breaking changes
@@ -43,6 +44,5 @@ test("hello world", () => {
   expect(1).toBe(1);
 });
 ```
-
 
 For more information, read the Bun API docs in `node_modules/bun-types/docs/**.mdx`.

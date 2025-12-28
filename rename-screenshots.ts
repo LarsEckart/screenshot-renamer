@@ -38,8 +38,7 @@ async function getImageMediaType(ext: string): Promise<"image/png"> {
   return types[ext.toLowerCase()] || "image/png";
 }
 
-const MACOS_SCREENSHOT_PATTERN =
-  /^Screenshot (\d{4}-\d{2}-\d{2}) at (\d{1,2})\.(\d{2})\.\d{2}/;
+const MACOS_SCREENSHOT_PATTERN = /^Screenshot (\d{4}-\d{2}-\d{2}) at (\d{1,2})\.(\d{2})\.\d{2}/;
 
 export function isMacOSScreenshot(filename: string): boolean {
   return MACOS_SCREENSHOT_PATTERN.test(filename);
@@ -191,7 +190,7 @@ if (import.meta.main) {
 
   // Parse --days flag
   let days = DEFAULT_DAYS;
-  const daysIndex = args.findIndex(arg => arg === "--days" || arg === "-d");
+  const daysIndex = args.findIndex((arg) => arg === "--days" || arg === "-d");
   if (daysIndex !== -1 && args[daysIndex + 1]) {
     const parsedDays = parseInt(args[daysIndex + 1], 10);
     if (isNaN(parsedDays) || parsedDays < 1) {
@@ -246,7 +245,7 @@ Environment:
   console.log(
     dryRun
       ? `🔍 DRY RUN MODE v${VERSION} - no files will be renamed\n`
-      : `🚀 Starting screenshot renamer v${VERSION}...\n`,
+      : `🚀 Starting screenshot renamer v${VERSION}...\n`
   );
   console.log(`📁 Target directory: ${targetDir}`);
   console.log(`📅 Looking back: ${days} day${days === 1 ? "" : "s"}\n`);

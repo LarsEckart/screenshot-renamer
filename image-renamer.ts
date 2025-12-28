@@ -126,7 +126,7 @@ async function processImage(imagePath: string, dryRun = false) {
   let finalPath = newPath;
   let finalName = newFilename;
   let counter = 1;
-  while (await Bun.file(finalPath).exists() && finalPath !== imagePath) {
+  while ((await Bun.file(finalPath).exists()) && finalPath !== imagePath) {
     finalName = `${suggestedName}-${counter}${ext}`;
     finalPath = join(dir, finalName);
     counter++;
@@ -183,7 +183,7 @@ if (import.meta.main) {
   }
 
   // Find the image path (first non-flag argument)
-  const imagePath = args.find(arg => !arg.startsWith("-"));
+  const imagePath = args.find((arg) => !arg.startsWith("-"));
 
   if (!imagePath) {
     console.error("❌ Please provide an image file to rename\n");

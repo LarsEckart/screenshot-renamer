@@ -73,12 +73,12 @@ screenshot-renamer --days 30 ~/Desktop
 screenshot-renamer --dry-run ~/Desktop
 ```
 
-| Option | Description |
-|--------|-------------|
+| Option                 | Description                                            |
+| ---------------------- | ------------------------------------------------------ |
 | `--days <n>`, `-d <n>` | Only process screenshots from last n days (default: 7) |
-| `--dry-run`, `-n` | Show what would be renamed without making changes |
-| `--help`, `-h` | Show help message |
-| `--version`, `-v` | Show version |
+| `--dry-run`, `-n`      | Show what would be renamed without making changes      |
+| `--help`, `-h`         | Show help message                                      |
+| `--version`, `-v`      | Show version                                           |
 
 ### image-renamer
 
@@ -90,11 +90,11 @@ image-renamer ~/Downloads/signal-2025-11-19-14-23-47-588.jpg
 image-renamer --dry-run ~/Downloads/IMG_20231015_123456.jpg
 ```
 
-| Option | Description |
-|--------|-------------|
+| Option            | Description                                 |
+| ----------------- | ------------------------------------------- |
 | `--dry-run`, `-n` | Show suggested name and output `mv` command |
-| `--help`, `-h` | Show help message |
-| `--version`, `-v` | Show version |
+| `--help`, `-h`    | Show help message                           |
+| `--version`, `-v` | Show version                                |
 
 Supported formats: `.png`, `.jpg`, `.jpeg`, `.gif`, `.webp`
 
