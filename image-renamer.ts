@@ -1,11 +1,15 @@
 #!/usr/bin/env bun
 
-const VERSION = "1.2.0";
+const VERSION = "1.3.0";
 
-import { appendFile, mkdir, readFile, rename, stat } from "node:fs/promises";
+import { appendFile, mkdir, rename, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, dirname, extname, join } from "node:path";
-import Anthropic from "@anthropic-ai/sdk";
+import {
+  AUTHENTICATION_HELP_TEXT,
+  assertSuggestionAuthConfigured,
+  suggestNameFromImage,
+} from "./llm";
 
 const SUPPORTED_EXTENSIONS = [".png", ".jpg", ".jpeg", ".gif", ".webp"];
 const HISTORY_FILE = join(homedir(), ".config", "image-renamer", "history.txt");
@@ -16,8 +20,6 @@ async function logRename(oldPath: string, newPath: string): Promise<void> {
   await mkdir(dirname(HISTORY_FILE), { recursive: true });
   await appendFile(HISTORY_FILE, entry);
 }
-
-const client = new Anthropic();
 
 type ImageMediaType = "image/png" | "image/jpeg" | "image/gif" | "image/webp";
 
@@ -44,28 +46,12 @@ export function sanitizeFilename(name: string): string {
 
 async function suggestName(imagePath: string): Promise<string | null> {
   const ext = extname(imagePath).toLowerCase();
-  const imageData = await readFile(imagePath);
-  const base64 = imageData.toString("base64");
+  const imageData = await Bun.file(imagePath).arrayBuffer();
+  const base64 = Buffer.from(imageData).toString("base64");
   const mediaType = getImageMediaType(ext);
 
-  const response = await client.messages.create({
-    model: "claude-sonnet-4-6",
-    max_tokens: 100,
-    messages: [
-      {
-        role: "user",
-        content: [
-          {
-            type: "image",
-            source: {
-              type: "base64",
-              media_type: mediaType,
-              data: base64,
-            },
-          },
-          {
-            type: "text",
-            text: `Suggest a short, descriptive filename for this image (without extension).
+  const suggestion = await suggestNameFromImage(
+    `Suggest a short, descriptive filename for this image (without extension).
 The name should be:
 - Lowercase with hyphens (e.g., "orange-cat-on-couch", "sunset-over-mountains")
 - Max 50 characters, aim for 2-5 words
@@ -73,16 +59,14 @@ The name should be:
 - No generic names like "image" or "photo"
 
 Reply with ONLY the suggested filename, nothing else.`,
-          },
-        ],
-      },
-    ],
-  });
+    base64,
+    mediaType
+  );
 
-  const textBlock = response.content.find((block) => block.type === "text");
-  if (textBlock && textBlock.type === "text") {
-    return sanitizeFilename(textBlock.text);
+  if (suggestion) {
+    return sanitizeFilename(suggestion);
   }
+
   return null;
 }
 
@@ -144,7 +128,7 @@ async function processImage(imagePath: string, dryRun = false) {
 
 function showHelp() {
   console.log(`
-Image Renamer v${VERSION} - Uses Claude Vision to give images descriptive names
+Image Renamer v${VERSION} - Uses GPT vision models to give images descriptive names
 
 Usage: image-renamer [options] <image>
 
@@ -158,8 +142,7 @@ Options:
 
 Supported formats: ${SUPPORTED_EXTENSIONS.join(", ")}
 
-Environment:
-  ANTHROPIC_API_KEY   Required: Your Anthropic API key
+${AUTHENTICATION_HELP_TEXT}
 
 Examples:
   image-renamer signal-2025-11-19-14-23-47-588.jpg
@@ -191,16 +174,18 @@ if (import.meta.main) {
     process.exit(1);
   }
 
-  if (!process.env.ANTHROPIC_API_KEY) {
-    console.error("❌ ANTHROPIC_API_KEY environment variable is required");
+  try {
+    await assertSuggestionAuthConfigured();
+
+    console.log(
+      dryRun
+        ? `🔍 DRY RUN MODE v${VERSION} - file will not be renamed\n`
+        : `🚀 Starting image renamer v${VERSION}...\n`
+    );
+
+    await processImage(imagePath, dryRun);
+  } catch (error) {
+    console.error(`❌ ${error instanceof Error ? error.message : String(error)}`);
     process.exit(1);
   }
-
-  console.log(
-    dryRun
-      ? `🔍 DRY RUN MODE v${VERSION} - file will not be renamed\n`
-      : `🚀 Starting image renamer v${VERSION}...\n`
-  );
-
-  processImage(imagePath, dryRun);
 }

@@ -1,11 +1,15 @@
 #!/usr/bin/env bun
 
-const VERSION = "1.2.0";
+const VERSION = "1.3.0";
 
-import { appendFile, mkdir, readdir, readFile, rename, stat } from "node:fs/promises";
+import { appendFile, mkdir, readdir, rename, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, extname, join } from "node:path";
-import Anthropic from "@anthropic-ai/sdk";
+import {
+  AUTHENTICATION_HELP_TEXT,
+  assertSuggestionAuthConfigured,
+  suggestNameFromImage,
+} from "./llm";
 
 const SUPPORTED_EXTENSIONS = [".png"];
 const SCREENSHOTS_DIR = process.cwd();
@@ -18,8 +22,6 @@ async function logRename(oldPath: string, newPath: string): Promise<void> {
   await mkdir(dirname(HISTORY_FILE), { recursive: true });
   await appendFile(HISTORY_FILE, entry);
 }
-
-const client = new Anthropic();
 
 export function formatErrorMessage(error: unknown): string {
   const message = error instanceof Error ? error.message : String(error);
@@ -65,28 +67,12 @@ export function sanitizeFilename(name: string): string {
 
 async function suggestName(imagePath: string): Promise<string | null> {
   const ext = extname(imagePath).toLowerCase();
-  const imageData = await readFile(imagePath);
-  const base64 = imageData.toString("base64");
+  const imageData = await Bun.file(imagePath).arrayBuffer();
+  const base64 = Buffer.from(imageData).toString("base64");
   const mediaType = await getImageMediaType(ext);
 
-  const response = await client.messages.create({
-    model: "claude-sonnet-4-6",
-    max_tokens: 100,
-    messages: [
-      {
-        role: "user",
-        content: [
-          {
-            type: "image",
-            source: {
-              type: "base64",
-              media_type: mediaType,
-              data: base64,
-            },
-          },
-          {
-            type: "text",
-            text: `Analyze this screenshot and suggest a short, descriptive filename (without extension).
+  const suggestion = await suggestNameFromImage(
+    `Analyze this screenshot and suggest a short, descriptive filename (without extension).
 The name should be:
 - Lowercase with hyphens (e.g., "slack-conversation-about-deployment")
 - Max 50 characters
@@ -94,16 +80,14 @@ The name should be:
 - No generic names like "screenshot" or "image"
 
 Reply with ONLY the suggested filename, nothing else.`,
-          },
-        ],
-      },
-    ],
-  });
+    base64,
+    mediaType
+  );
 
-  const textBlock = response.content.find((block) => block.type === "text");
-  if (textBlock && textBlock.type === "text") {
-    return sanitizeFilename(textBlock.text);
+  if (suggestion) {
+    return sanitizeFilename(suggestion);
   }
+
   return null;
 }
 
@@ -218,7 +202,7 @@ if (import.meta.main) {
 
   if (args.includes("--help") || args.includes("-h")) {
     console.log(`
-Screenshot Renamer v${VERSION} - Uses Claude Vision to give screenshots descriptive names
+Screenshot Renamer v${VERSION} - Uses GPT vision models to give screenshots descriptive names
 
 Usage: screenshot-renamer [options] [folder]
 
@@ -231,23 +215,24 @@ Options:
   --version, -v       Show version number
   --help, -h          Show this help message
 
-Environment:
-  ANTHROPIC_API_KEY    Required: Your Anthropic API key
+${AUTHENTICATION_HELP_TEXT}
 `);
     process.exit(0);
   }
 
-  if (!process.env.ANTHROPIC_API_KEY) {
-    console.error("❌ ANTHROPIC_API_KEY environment variable is required");
+  try {
+    await assertSuggestionAuthConfigured();
+
+    console.log(
+      dryRun
+        ? `🔍 DRY RUN MODE v${VERSION} - no files will be renamed\n`
+        : `🚀 Starting screenshot renamer v${VERSION}...\n`
+    );
+    console.log(`📁 Target directory: ${targetDir}`);
+    console.log(`📅 Looking back: ${days} day${days === 1 ? "" : "s"}\n`);
+    await processScreenshots(targetDir, dryRun, days);
+  } catch (error) {
+    console.error(`❌ ${formatErrorMessage(error)}`);
     process.exit(1);
   }
-
-  console.log(
-    dryRun
-      ? `🔍 DRY RUN MODE v${VERSION} - no files will be renamed\n`
-      : `🚀 Starting screenshot renamer v${VERSION}...\n`
-  );
-  console.log(`📁 Target directory: ${targetDir}`);
-  console.log(`📅 Looking back: ${days} day${days === 1 ? "" : "s"}\n`);
-  processScreenshots(targetDir, dryRun, days);
 }

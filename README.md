@@ -2,8 +2,8 @@
 
 [![Certified Shovelware](https://justin.searls.co/img/shovelware.svg)](https://justin.searls.co/shovelware/)
 
-Uses Anthropic vision models to automatically rename images with descriptive names.
-Defaults to Claude Sonnet 4.6 for filename suggestions.
+Uses the published `@mariozechner/pi-ai` package to automatically rename images with descriptive names.
+Defaults to GPT-5.4 mini for filename suggestions when Pi auth or OpenRouter auth is available.
 
 ## Tools
 
@@ -21,7 +21,7 @@ Transforms `signal-2025-11-19-14-23-47-588.jpg` into `cat-sleeping-on-keyboard.j
 
 ## Features
 
-- Analyzes image content using Claude Sonnet 4.6
+- Analyzes image content using GPT vision models
 - Generates descriptive, kebab-case filenames
 - `screenshot-renamer`: preserves date/time prefix, batch processes directories
 - `image-renamer`: single file mode, outputs copy-pasteable `mv` command in dry-run
@@ -32,13 +32,15 @@ Transforms `signal-2025-11-19-14-23-47-588.jpg` into `cat-sleeping-on-keyboard.j
 ### Prerequisites
 
 - [Bun](https://bun.sh) runtime
-- [Anthropic API key](https://console.anthropic.com/)
+- Preferred: existing Pi `openai-codex` auth in `~/.pi/agent/auth.json`
+- Or: `OPENROUTER_API_KEY` for exact GPT-5.4 mini API-key access
+- Or: `OPENAI_API_KEY` for GPT-5 mini fallback
 
 ### Install
 
 ```bash
-git clone https://github.com/LarsEckart/screenshot-renamer.git
-cd screenshot-renamer
+git clone https://github.com/LarsEckart/screenshot-renamer.git ~/GitHub/screenshot-renamer
+cd ~/GitHub/screenshot-renamer
 ./install.sh
 ```
 
@@ -50,12 +52,18 @@ This builds native binaries and installs them to `~/.local/bin/`.
 ./install.sh --uninstall
 ```
 
-### Set up your API key
+### Authentication
 
-Add to your shell config (`~/.bashrc`, `~/.zshrc`, etc.):
+Preferred: reuse the same Pi auth you already use interactively. If `~/.pi/agent/auth.json` contains an `openai-codex` login, the tool will use that automatically.
+
+API-key fallbacks:
 
 ```bash
-export ANTHROPIC_API_KEY="your-api-key-here"
+# Exact GPT-5.4 mini via API key
+export OPENROUTER_API_KEY="your-api-key-here"
+
+# Fallback if you only have a standard OpenAI API key
+export OPENAI_API_KEY="your-api-key-here"
 ```
 
 ## Usage
@@ -106,8 +114,8 @@ Supported formats: `.png`, `.jpg`, `.jpeg`, `.gif`, `.webp`
 ### Setup
 
 ```bash
-git clone https://github.com/LarsEckart/screenshot-renamer.git
-cd screenshot-renamer
+git clone https://github.com/LarsEckart/screenshot-renamer.git ~/GitHub/screenshot-renamer
+cd ~/GitHub/screenshot-renamer
 bun install
 ```
 
@@ -141,8 +149,8 @@ bunx oxfmt --write .
 
 1. **screenshot-renamer**: Scans directory for PNGs matching macOS screenshot pattern (last N days)
 2. **image-renamer**: Takes a single image file as input
-3. Sends image to Claude Sonnet 4.6 via the Anthropic API for analysis
-4. Claude suggests a descriptive filename based on content
+3. Sends image to GPT-5.4 mini via Pi auth or API-key fallback using `@mariozechner/pi-ai`
+4. The model suggests a descriptive filename based on content
 5. Renames the file (screenshot-renamer preserves date/time prefix)
 6. Logs all renames to history file
 
