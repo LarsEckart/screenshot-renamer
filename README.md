@@ -23,7 +23,7 @@ Transforms `signal-2025-11-19-14-23-47-588.jpg` into `cat-sleeping-on-keyboard.j
 
 - Analyzes image content using GPT vision models
 - Generates descriptive, kebab-case filenames
-- `screenshot-renamer`: preserves date/time prefix, batch processes directories
+- `screenshot-renamer`: preserves date/time prefix, batch processes directories, analyzes up to 3 screenshots concurrently
 - `image-renamer`: single file mode, outputs copy-pasteable `mv` command in dry-run
 - Keeps history logs at `~/.config/{screenshot,image}-renamer/history.txt`
 
@@ -150,7 +150,7 @@ bunx oxfmt --write .
 1. **screenshot-renamer**: Scans directory for PNGs matching macOS screenshot pattern (last N days)
 2. **image-renamer**: Takes a single image file as input
 3. Sends image to GPT-5.4 mini via Pi auth or API-key fallback using `@mariozechner/pi-ai`
-4. The model suggests a descriptive filename based on content
+4. `screenshot-renamer` analyzes up to 3 screenshots at a time, then applies renames deterministically
 5. Renames the file (screenshot-renamer preserves date/time prefix)
 6. Logs all renames to history file
 

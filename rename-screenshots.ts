@@ -1,20 +1,38 @@
 #!/usr/bin/env bun
 
-const VERSION = "1.3.0";
+const VERSION = "1.3.1";
 
 import { appendFile, mkdir, readdir, rename, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, extname, join } from "node:path";
 import {
   AUTHENTICATION_HELP_TEXT,
-  assertSuggestionAuthConfigured,
+  resolveSuggestionAuth,
   suggestNameFromImage,
+  type SuggestionAuth,
 } from "./llm";
 
 const SUPPORTED_EXTENSIONS = [".png"];
 const SCREENSHOTS_DIR = process.cwd();
 const DEFAULT_DAYS = 7;
+const ANALYSIS_CONCURRENCY = 3;
 const HISTORY_FILE = join(homedir(), ".config", "screenshot-renamer", "history.txt");
+
+type ImageAnalysisResult =
+  | {
+      image: string;
+      status: "suggested";
+      suggestedName: string;
+    }
+  | {
+      image: string;
+      status: "no-suggestion";
+    }
+  | {
+      image: string;
+      status: "error";
+      error: unknown;
+    };
 
 async function logRename(oldPath: string, newPath: string): Promise<void> {
   const timestamp = new Date().toISOString();
@@ -38,6 +56,47 @@ async function getImageMediaType(ext: string): Promise<"image/png"> {
     ".png": "image/png",
   };
   return types[ext.toLowerCase()] || "image/png";
+}
+
+export function getUniqueFilename(
+  baseName: string,
+  extension: string,
+  reservedNames: ReadonlySet<string>
+): string {
+  let candidate = `${baseName}${extension}`;
+  let counter = 1;
+
+  while (reservedNames.has(candidate)) {
+    candidate = `${baseName}-${counter}${extension}`;
+    counter++;
+  }
+
+  return candidate;
+}
+
+export async function mapWithConcurrency<T, U>(
+  items: readonly T[],
+  concurrency: number,
+  mapper: (item: T, index: number) => Promise<U>
+): Promise<U[]> {
+  if (!Number.isInteger(concurrency) || concurrency < 1) {
+    throw new Error(`Concurrency must be a positive integer, got ${concurrency}`);
+  }
+
+  const results = Array.from({ length: items.length }) as U[];
+  let nextIndex = 0;
+
+  async function worker(): Promise<void> {
+    while (nextIndex < items.length) {
+      const currentIndex = nextIndex;
+      nextIndex++;
+      results[currentIndex] = await mapper(items[currentIndex]!, currentIndex);
+    }
+  }
+
+  const workerCount = Math.min(concurrency, items.length);
+  await Promise.all(Array.from({ length: workerCount }, () => worker()));
+  return results;
 }
 
 const MACOS_SCREENSHOT_PATTERN = /^Screenshot (\d{4}-\d{2}-\d{2}) at (\d{1,2})\.(\d{2})\.\d{2}/;
@@ -65,7 +124,10 @@ export function sanitizeFilename(name: string): string {
     .slice(0, 50);
 }
 
-async function suggestName(imagePath: string): Promise<string | null> {
+async function suggestName(
+  imagePath: string,
+  suggestionAuth: SuggestionAuth
+): Promise<string | null> {
   const ext = extname(imagePath).toLowerCase();
   const imageData = await Bun.file(imagePath).arrayBuffer();
   const base64 = Buffer.from(imageData).toString("base64");
@@ -81,7 +143,8 @@ The name should be:
 
 Reply with ONLY the suggested filename, nothing else.`,
     base64,
-    mediaType
+    mediaType,
+    suggestionAuth
   );
 
   if (suggestion) {
@@ -99,7 +162,42 @@ async function isRecentFile(filePath: string, maxDaysOld: number): Promise<boole
   return now - createdAt <= maxAgeMs;
 }
 
-async function processScreenshots(directory: string, dryRun = false, days = DEFAULT_DAYS) {
+async function analyzeImage(
+  directory: string,
+  image: string,
+  suggestionAuth: SuggestionAuth
+): Promise<ImageAnalysisResult> {
+  const imagePath = join(directory, image);
+
+  try {
+    const suggestedName = await suggestName(imagePath, suggestionAuth);
+    if (!suggestedName) {
+      return {
+        image,
+        status: "no-suggestion",
+      };
+    }
+
+    return {
+      image,
+      status: "suggested",
+      suggestedName,
+    };
+  } catch (error) {
+    return {
+      image,
+      status: "error",
+      error,
+    };
+  }
+}
+
+async function processScreenshots(
+  directory: string,
+  suggestionAuth: SuggestionAuth,
+  dryRun = false,
+  days = DEFAULT_DAYS
+) {
   const files = await readdir(directory);
   const candidates = files.filter((f) => {
     const ext = extname(f).toLowerCase();
@@ -121,38 +219,39 @@ async function processScreenshots(directory: string, dryRun = false, days = DEFA
 
   console.log(`Found ${images.length} image(s) to process...\n`);
 
-  for (const image of images) {
-    const imagePath = join(directory, image);
-    const ext = extname(image);
+  const analyses = await mapWithConcurrency(images, ANALYSIS_CONCURRENCY, (image) =>
+    analyzeImage(directory, image, suggestionAuth)
+  );
 
-    console.log(`📷 Processing: ${image}`);
+  const reservedNames = new Set(await readdir(directory));
+
+  for (const analysis of analyses) {
+    const imagePath = join(directory, analysis.image);
+    const ext = extname(analysis.image);
+
+    console.log(`📷 Processing: ${analysis.image}`);
 
     try {
-      const suggestedName = await suggestName(imagePath);
-      if (!suggestedName) {
+      if (analysis.status === "error") {
+        throw analysis.error;
+      }
+
+      if (analysis.status === "no-suggestion") {
         console.log("   ⚠️  Could not get suggestion, skipping\n");
         continue;
       }
 
-      const dateTimePrefix = getDateTimePrefix(image);
-      const newFilename = `${dateTimePrefix}-${suggestedName}${ext}`;
-      const newPath = join(directory, newFilename);
+      const dateTimePrefix = getDateTimePrefix(analysis.image);
+      const baseFilename = `${dateTimePrefix}-${analysis.suggestedName}`;
+      const newFilename = `${baseFilename}${ext}`;
 
-      if (newFilename === image) {
+      if (newFilename === analysis.image) {
         console.log("   ✓ Already has a good name\n");
         continue;
       }
 
-      // Check if target already exists, add number suffix if needed
-      let finalPath = newPath;
-      let finalName = newFilename;
-      let counter = 1;
-      const existingFiles = await readdir(directory);
-      while (existingFiles.includes(finalName)) {
-        finalName = `${suggestedName}-${counter}${ext}`;
-        finalPath = join(directory, finalName);
-        counter++;
-      }
+      const finalName = getUniqueFilename(baseFilename, ext, reservedNames);
+      const finalPath = join(directory, finalName);
 
       if (dryRun) {
         console.log(`   → Would rename to: ${finalName}\n`);
@@ -161,6 +260,9 @@ async function processScreenshots(directory: string, dryRun = false, days = DEFA
         await logRename(imagePath, finalPath);
         console.log(`   ✅ Renamed to: ${finalName}\n`);
       }
+
+      reservedNames.delete(analysis.image);
+      reservedNames.add(finalName);
     } catch (error) {
       console.error(`   ❌ Error: ${formatErrorMessage(error)}\n`);
     }
@@ -221,7 +323,7 @@ ${AUTHENTICATION_HELP_TEXT}
   }
 
   try {
-    await assertSuggestionAuthConfigured();
+    const suggestionAuth = await resolveSuggestionAuth();
 
     console.log(
       dryRun
@@ -230,7 +332,8 @@ ${AUTHENTICATION_HELP_TEXT}
     );
     console.log(`📁 Target directory: ${targetDir}`);
     console.log(`📅 Looking back: ${days} day${days === 1 ? "" : "s"}\n`);
-    await processScreenshots(targetDir, dryRun, days);
+    console.log(`⚡ LLM analysis concurrency: ${ANALYSIS_CONCURRENCY}\n`);
+    await processScreenshots(targetDir, suggestionAuth, dryRun, days);
   } catch (error) {
     console.error(`❌ ${formatErrorMessage(error)}`);
     process.exit(1);

@@ -35,6 +35,8 @@ type ResolvedAuth = {
   apiKey?: string;
 };
 
+export type SuggestionAuth = ResolvedAuth;
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }
@@ -104,7 +106,7 @@ async function resolvePiCodexAuth(): Promise<ResolvedAuth | null> {
   };
 }
 
-async function resolveSuggestionAuth(): Promise<ResolvedAuth> {
+export async function resolveSuggestionAuth(): Promise<SuggestionAuth> {
   let piAuthError: string | null = null;
 
   try {
@@ -155,9 +157,10 @@ export const AUTHENTICATION_HELP_TEXT = `Authentication:
 export async function suggestNameFromImage(
   prompt: string,
   imageBase64: string,
-  mimeType: SupportedImageMimeType
+  mimeType: SupportedImageMimeType,
+  authOverride?: SuggestionAuth
 ): Promise<string | null> {
-  const auth = await resolveSuggestionAuth();
+  const auth = authOverride ?? (await resolveSuggestionAuth());
   const response = await complete(
     auth.model,
     {

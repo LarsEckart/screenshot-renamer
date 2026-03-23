@@ -1,14 +1,15 @@
 #!/usr/bin/env bun
 
-const VERSION = "1.3.0";
+const VERSION = "1.3.1";
 
 import { appendFile, mkdir, rename, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, dirname, extname, join } from "node:path";
 import {
   AUTHENTICATION_HELP_TEXT,
-  assertSuggestionAuthConfigured,
+  resolveSuggestionAuth,
   suggestNameFromImage,
+  type SuggestionAuth,
 } from "./llm";
 
 const SUPPORTED_EXTENSIONS = [".png", ".jpg", ".jpeg", ".gif", ".webp"];
@@ -44,7 +45,10 @@ export function sanitizeFilename(name: string): string {
     .slice(0, 50);
 }
 
-async function suggestName(imagePath: string): Promise<string | null> {
+async function suggestName(
+  imagePath: string,
+  suggestionAuth: SuggestionAuth
+): Promise<string | null> {
   const ext = extname(imagePath).toLowerCase();
   const imageData = await Bun.file(imagePath).arrayBuffer();
   const base64 = Buffer.from(imageData).toString("base64");
@@ -60,7 +64,8 @@ The name should be:
 
 Reply with ONLY the suggested filename, nothing else.`,
     base64,
-    mediaType
+    mediaType,
+    suggestionAuth
   );
 
   if (suggestion) {
@@ -70,7 +75,7 @@ Reply with ONLY the suggested filename, nothing else.`,
   return null;
 }
 
-async function processImage(imagePath: string, dryRun = false) {
+async function processImage(imagePath: string, suggestionAuth: SuggestionAuth, dryRun = false) {
   const ext = extname(imagePath).toLowerCase();
   const dir = dirname(imagePath);
   const currentName = basename(imagePath);
@@ -92,7 +97,7 @@ async function processImage(imagePath: string, dryRun = false) {
 
   console.log(`🖼️  Processing: ${currentName}`);
 
-  const suggestedName = await suggestName(imagePath);
+  const suggestedName = await suggestName(imagePath, suggestionAuth);
   if (!suggestedName) {
     console.error("   ❌ Could not get suggestion from API");
     process.exit(1);
@@ -175,7 +180,7 @@ if (import.meta.main) {
   }
 
   try {
-    await assertSuggestionAuthConfigured();
+    const suggestionAuth = await resolveSuggestionAuth();
 
     console.log(
       dryRun
@@ -183,7 +188,7 @@ if (import.meta.main) {
         : `🚀 Starting image renamer v${VERSION}...\n`
     );
 
-    await processImage(imagePath, dryRun);
+    await processImage(imagePath, suggestionAuth, dryRun);
   } catch (error) {
     console.error(`❌ ${error instanceof Error ? error.message : String(error)}`);
     process.exit(1);

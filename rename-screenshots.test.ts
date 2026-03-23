@@ -4,6 +4,8 @@ import {
   getDateTimePrefix,
   sanitizeFilename,
   formatErrorMessage,
+  getUniqueFilename,
+  mapWithConcurrency,
 } from "./rename-screenshots";
 
 describe("isMacOSScreenshot", () => {
@@ -107,5 +109,43 @@ describe("formatErrorMessage", () => {
   test("extracts message from other JSON error formats", () => {
     const otherError = '{"error": {"message": "Rate limit exceeded"}}';
     expect(formatErrorMessage(new Error(otherError))).toBe("Rate limit exceeded");
+  });
+});
+
+describe("getUniqueFilename", () => {
+  test("returns the base filename when it is available", () => {
+    expect(getUniqueFilename("2024-12-10-03-45-slack-thread", ".png", new Set())).toBe(
+      "2024-12-10-03-45-slack-thread.png"
+    );
+  });
+
+  test("adds a numeric suffix when the target name is already reserved", () => {
+    const reservedNames = new Set([
+      "2024-12-10-03-45-slack-thread.png",
+      "2024-12-10-03-45-slack-thread-1.png",
+    ]);
+
+    expect(getUniqueFilename("2024-12-10-03-45-slack-thread", ".png", reservedNames)).toBe(
+      "2024-12-10-03-45-slack-thread-2.png"
+    );
+  });
+});
+
+describe("mapWithConcurrency", () => {
+  test("preserves item order while respecting the concurrency limit", async () => {
+    const delays = [30, 5, 20, 10, 1];
+    let active = 0;
+    let maxActive = 0;
+
+    const results = await mapWithConcurrency(delays, 3, async (delay, index) => {
+      active++;
+      maxActive = Math.max(maxActive, active);
+      await Bun.sleep(delay);
+      active--;
+      return `result-${index}`;
+    });
+
+    expect(results).toEqual(["result-0", "result-1", "result-2", "result-3", "result-4"]);
+    expect(maxActive).toBeLessThanOrEqual(3);
   });
 });
