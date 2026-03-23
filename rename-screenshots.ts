@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 
-const VERSION = "1.1.3";
+const VERSION = "1.2.0";
 
 import { appendFile, mkdir, readdir, readFile, rename, stat } from "node:fs/promises";
 import { homedir } from "node:os";
@@ -70,7 +70,7 @@ async function suggestName(imagePath: string): Promise<string | null> {
   const mediaType = await getImageMediaType(ext);
 
   const response = await client.messages.create({
-    model: "claude-haiku-4-5-20251001",
+    model: "claude-sonnet-4-6",
     max_tokens: 100,
     messages: [
       {

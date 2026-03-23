@@ -2,7 +2,8 @@
 
 [![Certified Shovelware](https://justin.searls.co/img/shovelware.svg)](https://justin.searls.co/shovelware/)
 
-Uses Claude Vision to automatically rename images with descriptive names.
+Uses Anthropic vision models to automatically rename images with descriptive names.
+Defaults to Claude Sonnet 4.6 for filename suggestions.
 
 ## Tools
 
@@ -20,7 +21,7 @@ Transforms `signal-2025-11-19-14-23-47-588.jpg` into `cat-sleeping-on-keyboard.j
 
 ## Features
 
-- Analyzes image content using Claude Haiku (fast & cheap)
+- Analyzes image content using Claude Sonnet 4.6
 - Generates descriptive, kebab-case filenames
 - `screenshot-renamer`: preserves date/time prefix, batch processes directories
 - `image-renamer`: single file mode, outputs copy-pasteable `mv` command in dry-run
@@ -36,7 +37,7 @@ Transforms `signal-2025-11-19-14-23-47-588.jpg` into `cat-sleeping-on-keyboard.j
 ### Install
 
 ```bash
-git clone https://github.com/user/screenshot-renamer.git
+git clone https://github.com/LarsEckart/screenshot-renamer.git
 cd screenshot-renamer
 ./install.sh
 ```
@@ -105,7 +106,7 @@ Supported formats: `.png`, `.jpg`, `.jpeg`, `.gif`, `.webp`
 ### Setup
 
 ```bash
-git clone https://github.com/user/screenshot-renamer.git
+git clone https://github.com/LarsEckart/screenshot-renamer.git
 cd screenshot-renamer
 bun install
 ```
@@ -131,15 +132,16 @@ bun test
 ### Lint & Format
 
 ```bash
-bun run biome check .
-bun run biome format --write .
+bunx oxlint .
+bunx oxfmt --check .
+bunx oxfmt --write .
 ```
 
 ## How it works
 
 1. **screenshot-renamer**: Scans directory for PNGs matching macOS screenshot pattern (last N days)
 2. **image-renamer**: Takes a single image file as input
-3. Sends image to Claude Haiku for analysis
+3. Sends image to Claude Sonnet 4.6 via the Anthropic API for analysis
 4. Claude suggests a descriptive filename based on content
 5. Renames the file (screenshot-renamer preserves date/time prefix)
 6. Logs all renames to history file
