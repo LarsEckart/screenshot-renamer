@@ -4,6 +4,8 @@ import {
   getDateTimePrefix,
   sanitizeFilename,
   formatErrorMessage,
+  getSuggestedBaseName,
+  getSuggestedFilename,
   getUniqueFilename,
   mapWithConcurrency,
 } from "./rename-screenshots";
@@ -131,6 +133,28 @@ describe("getUniqueFilename", () => {
   });
 });
 
+describe("getSuggestedBaseName", () => {
+  test("preserves the screenshot timestamp prefix", () => {
+    expect(
+      getSuggestedBaseName(
+        "Screenshot 2024-12-10 at 3.45.22 PM.png",
+        "slack-conversation-about-deployment"
+      )
+    ).toBe("2024-12-10-03-45-slack-conversation-about-deployment");
+  });
+});
+
+describe("getSuggestedFilename", () => {
+  test("adds the original file extension", () => {
+    expect(
+      getSuggestedFilename(
+        "Screenshot 2024-12-10 at 3.45.22 PM.png",
+        "slack-conversation-about-deployment"
+      )
+    ).toBe("2024-12-10-03-45-slack-conversation-about-deployment.png");
+  });
+});
+
 describe("mapWithConcurrency", () => {
   test("preserves item order while respecting the concurrency limit", async () => {
     const delays = [30, 5, 20, 10, 1];
@@ -147,5 +171,40 @@ describe("mapWithConcurrency", () => {
 
     expect(results).toEqual(["result-0", "result-1", "result-2", "result-3", "result-4"]);
     expect(maxActive).toBeLessThanOrEqual(3);
+  });
+
+  test("can report progress as each item finishes", async () => {
+    const releases = [
+      Promise.withResolvers<void>(),
+      Promise.withResolvers<void>(),
+      Promise.withResolvers<void>(),
+    ];
+    const completed: string[] = [];
+
+    const run = mapWithConcurrency(
+      [0, 1, 2],
+      3,
+      async (item) => {
+        await releases[item].promise;
+        return `result-${item}`;
+      },
+      {
+        onResolved: (result) => {
+          completed.push(result);
+        },
+      }
+    );
+
+    releases[1].resolve();
+    await Bun.sleep(0);
+    expect(completed).toEqual(["result-1"]);
+
+    releases[2].resolve();
+    await Bun.sleep(0);
+    expect(completed).toEqual(["result-1", "result-2"]);
+
+    releases[0].resolve();
+    await run;
+    expect(completed).toEqual(["result-1", "result-2", "result-0"]);
   });
 });

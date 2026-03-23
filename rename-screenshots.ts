@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 
-const VERSION = "1.3.1";
+const VERSION = "1.3.4";
 
 import { appendFile, mkdir, readdir, rename, stat } from "node:fs/promises";
 import { homedir } from "node:os";
@@ -33,6 +33,11 @@ type ImageAnalysisResult =
       status: "error";
       error: unknown;
     };
+
+type MapWithConcurrencyOptions<T, U> = {
+  onStarted?: (item: T, index: number) => void | Promise<void>;
+  onResolved?: (result: U, item: T, index: number) => void | Promise<void>;
+};
 
 async function logRename(oldPath: string, newPath: string): Promise<void> {
   const timestamp = new Date().toISOString();
@@ -77,7 +82,8 @@ export function getUniqueFilename(
 export async function mapWithConcurrency<T, U>(
   items: readonly T[],
   concurrency: number,
-  mapper: (item: T, index: number) => Promise<U>
+  mapper: (item: T, index: number) => Promise<U>,
+  options?: MapWithConcurrencyOptions<T, U>
 ): Promise<U[]> {
   if (!Number.isInteger(concurrency) || concurrency < 1) {
     throw new Error(`Concurrency must be a positive integer, got ${concurrency}`);
@@ -90,7 +96,11 @@ export async function mapWithConcurrency<T, U>(
     while (nextIndex < items.length) {
       const currentIndex = nextIndex;
       nextIndex++;
-      results[currentIndex] = await mapper(items[currentIndex]!, currentIndex);
+      const item = items[currentIndex]!;
+      await options?.onStarted?.(item, currentIndex);
+      const result = await mapper(item, currentIndex);
+      results[currentIndex] = result;
+      await options?.onResolved?.(result, item, currentIndex);
     }
   }
 
@@ -122,6 +132,14 @@ export function sanitizeFilename(name: string): string {
     .replace(/-+/g, "-")
     .replace(/^-|-$/g, "")
     .slice(0, 50);
+}
+
+export function getSuggestedBaseName(image: string, suggestedName: string): string {
+  return `${getDateTimePrefix(image)}-${suggestedName}`;
+}
+
+export function getSuggestedFilename(image: string, suggestedName: string): string {
+  return `${getSuggestedBaseName(image, suggestedName)}${extname(image)}`;
 }
 
 async function suggestName(
@@ -192,6 +210,58 @@ async function analyzeImage(
   }
 }
 
+async function handleCompletedAnalysis(
+  directory: string,
+  analysis: ImageAnalysisResult,
+  reservedNames: Set<string>,
+  dryRun: boolean,
+  completedCount: number,
+  totalCount: number
+): Promise<void> {
+  console.log(`🏷️ Renaming (${completedCount}/${totalCount}): ${analysis.image}`);
+
+  if (analysis.status === "error") {
+    console.error(`   ❌ Analysis failed: ${formatErrorMessage(analysis.error)}\n`);
+    return;
+  }
+
+  if (analysis.status === "no-suggestion") {
+    console.log("   ⚠️  Could not get suggestion, skipping\n");
+    return;
+  }
+
+  const ext = extname(analysis.image);
+  const imagePath = join(directory, analysis.image);
+  const baseFilename = getSuggestedBaseName(analysis.image, analysis.suggestedName);
+  const newFilename = `${baseFilename}${ext}`;
+
+  if (newFilename === analysis.image) {
+    console.log("   ✓ Already has a good name\n");
+    return;
+  }
+
+  const finalName = getUniqueFilename(baseFilename, ext, reservedNames);
+  const finalPath = join(directory, finalName);
+
+  reservedNames.delete(analysis.image);
+  reservedNames.add(finalName);
+
+  try {
+    if (dryRun) {
+      console.log(`   → Would rename to: ${finalName}\n`);
+      return;
+    }
+
+    await rename(imagePath, finalPath);
+    await logRename(imagePath, finalPath);
+    console.log(`   ✅ Renamed to: ${finalName}\n`);
+  } catch (error) {
+    reservedNames.delete(finalName);
+    reservedNames.add(analysis.image);
+    console.error(`   ❌ Error: ${formatErrorMessage(error)}\n`);
+  }
+}
+
 async function processScreenshots(
   directory: string,
   suggestionAuth: SuggestionAuth,
@@ -219,54 +289,30 @@ async function processScreenshots(
 
   console.log(`Found ${images.length} image(s) to process...\n`);
 
-  const analyses = await mapWithConcurrency(images, ANALYSIS_CONCURRENCY, (image) =>
-    analyzeImage(directory, image, suggestionAuth)
-  );
-
   const reservedNames = new Set(await readdir(directory));
+  let completedCount = 0;
 
-  for (const analysis of analyses) {
-    const imagePath = join(directory, analysis.image);
-    const ext = extname(analysis.image);
-
-    console.log(`📷 Processing: ${analysis.image}`);
-
-    try {
-      if (analysis.status === "error") {
-        throw analysis.error;
-      }
-
-      if (analysis.status === "no-suggestion") {
-        console.log("   ⚠️  Could not get suggestion, skipping\n");
-        continue;
-      }
-
-      const dateTimePrefix = getDateTimePrefix(analysis.image);
-      const baseFilename = `${dateTimePrefix}-${analysis.suggestedName}`;
-      const newFilename = `${baseFilename}${ext}`;
-
-      if (newFilename === analysis.image) {
-        console.log("   ✓ Already has a good name\n");
-        continue;
-      }
-
-      const finalName = getUniqueFilename(baseFilename, ext, reservedNames);
-      const finalPath = join(directory, finalName);
-
-      if (dryRun) {
-        console.log(`   → Would rename to: ${finalName}\n`);
-      } else {
-        await rename(imagePath, finalPath);
-        await logRename(imagePath, finalPath);
-        console.log(`   ✅ Renamed to: ${finalName}\n`);
-      }
-
-      reservedNames.delete(analysis.image);
-      reservedNames.add(finalName);
-    } catch (error) {
-      console.error(`   ❌ Error: ${formatErrorMessage(error)}\n`);
+  await mapWithConcurrency(
+    images,
+    ANALYSIS_CONCURRENCY,
+    (image) => analyzeImage(directory, image, suggestionAuth),
+    {
+      onStarted: (image, index) => {
+        console.log(`🔍 Analyzing (${index + 1}/${images.length}): ${image}`);
+      },
+      onResolved: async (analysis) => {
+        completedCount++;
+        await handleCompletedAnalysis(
+          directory,
+          analysis,
+          reservedNames,
+          dryRun,
+          completedCount,
+          images.length
+        );
+      },
     }
-  }
+  );
 }
 
 // CLI - only run when executed directly
