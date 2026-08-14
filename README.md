@@ -3,7 +3,7 @@
 [![Certified Shovelware](https://justin.searls.co/img/shovelware.svg)](https://justin.searls.co/shovelware/)
 
 This repo contains Bun/TypeScript CLI tools for renaming images and converting HEIF files.
-The AI-powered renamers use the published `@mariozechner/pi-ai` package and default to GPT-5.4 mini for filename suggestions when Pi auth or OpenRouter auth is available.
+The AI-powered renamers use the published `@earendil-works/pi-ai` package and default to GPT-5.4 mini for filename suggestions when Pi auth or OpenRouter auth is available.
 
 ## Tools
 
@@ -42,6 +42,7 @@ Keeps a global history in `~/.config/heif-to-png/history.json` so reruns can ski
 - [Bun](https://bun.sh) runtime
 - For `heif-to-png`: macOS with the built-in `sips` command
 - For the AI renamers:
+  - Override: `--claude-api` uses `ANTHROPIC_API_KEY` for Anthropic Claude Haiku 4.5
   - Preferred: existing Pi `openai-codex` auth in `~/.pi/agent/auth.json`
   - Or: `OPENROUTER_API_KEY` for exact GPT-5.4 mini API-key access
   - Or: `OPENAI_API_KEY` for GPT-5 mini fallback
@@ -66,6 +67,8 @@ This builds native binaries and installs them to `~/.local/bin/`.
 
 Preferred: reuse the same Pi auth you already use interactively. If `~/.pi/agent/auth.json` contains an `openai-codex` login, the tool will use that automatically.
 
+If you pass `--claude-api`, the tool uses `ANTHROPIC_API_KEY` with Anthropic Haiku 4.5.
+
 API-key fallbacks:
 
 ```bash
@@ -86,6 +89,9 @@ screenshot-renamer
 
 # Rename screenshots in a specific folder
 screenshot-renamer ~/Desktop
+
+# Use Anthropic Haiku 4.5 via ANTHROPIC_API_KEY
+ANTHROPIC_API_KEY=sk-ant-... screenshot-renamer --claude-api ~/Desktop
 
 # Only process last 30 days
 screenshot-renamer --days 30 ~/Desktop
@@ -191,7 +197,7 @@ bunx oxfmt --write .
 1. **screenshot-renamer**: Scans directory for PNGs matching macOS screenshot pattern (last N days)
 2. **image-renamer**: Takes a single image file as input
 3. **heif-to-png**: Scans one directory level for `.heic` / `.heif` files and converts each one with `sips`
-4. The AI renamers send images to GPT-5.4 mini via Pi auth or API-key fallback using `@mariozechner/pi-ai`
+4. The AI renamers send images to GPT-5.4 mini via Pi auth or API-key fallback using `@earendil-works/pi-ai`
 5. `screenshot-renamer` analyzes up to 3 screenshots at a time and renames each screenshot as soon as its suggestion is ready
 6. The renamers rename files in place (screenshot-renamer preserves date/time prefix)
 7. `heif-to-png` writes PNG copies to the output directory and leaves source files untouched

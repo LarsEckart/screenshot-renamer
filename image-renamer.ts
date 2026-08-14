@@ -25,15 +25,16 @@ async function logRename(oldPath: string, newPath: string): Promise<void> {
 
 type ImageMediaType = "image/png" | "image/jpeg" | "image/gif" | "image/webp";
 
+const IMAGE_MEDIA_TYPES = new Map<string, ImageMediaType>([
+  [".gif", "image/gif"],
+  [".jpeg", "image/jpeg"],
+  [".jpg", "image/jpeg"],
+  [".png", "image/png"],
+  [".webp", "image/webp"],
+]);
+
 function getImageMediaType(ext: string): ImageMediaType {
-  const types: Record<string, ImageMediaType> = {
-    ".gif": "image/gif",
-    ".jpeg": "image/jpeg",
-    ".jpg": "image/jpeg",
-    ".png": "image/png",
-    ".webp": "image/webp",
-  };
-  return types[ext.toLowerCase()] || "image/png";
+  return IMAGE_MEDIA_TYPES.get(ext.toLowerCase()) ?? "image/png";
 }
 
 export function sanitizeFilename(name: string): string {

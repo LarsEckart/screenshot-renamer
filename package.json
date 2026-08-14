@@ -7,7 +7,8 @@
     "lint:fix": "oxlint --fix ."
   },
   "dependencies": {
-    "@mariozechner/pi-ai": "^0.73.1"
+    "@earendil-works/pi-ai": "^0.84.1",
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@nkzw/eslint-plugin": "^2.0.0",

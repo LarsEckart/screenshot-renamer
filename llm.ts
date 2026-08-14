@@ -1,118 +1,180 @@
-import { rename } from "node:fs/promises";
+import { rename, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { complete, getModel, getModels, type Api, type Model } from "@mariozechner/pi-ai";
-import { getOAuthApiKey, type OAuthCredentials } from "@mariozechner/pi-ai/oauth";
+import {
+  defaultProviderAuthContext,
+  type Api,
+  type Credential,
+  type CredentialStore,
+  type Model,
+} from "@earendil-works/pi-ai";
+import { builtinModels, getBuiltinModel } from "@earendil-works/pi-ai/providers/all";
+import { z } from "zod";
 
 const PI_AUTH_FILE = join(homedir(), ".pi", "agent", "auth.json");
 const FILENAME_SUGGESTION_SYSTEM_PROMPT =
   "You analyze images and suggest concise, descriptive filenames. Reply with only the filename, never extra commentary.";
-const OPENAI_CODEX_MODEL = getModel("openai-codex", "gpt-5.4-mini");
-const OPENROUTER_MODEL = getModel("openrouter", "openai/gpt-5.4-mini");
-const OPENAI_MODEL =
-  getModels("openai").find((model) => model.id === "gpt-5.4-mini") ??
-  getModel("openai", "gpt-5-mini");
-
-if (!OPENAI_CODEX_MODEL) {
-  throw new Error("Could not resolve openai-codex:gpt-5.4-mini from @mariozechner/pi-ai");
-}
-
-if (!OPENROUTER_MODEL) {
-  throw new Error("Could not resolve openrouter:openai/gpt-5.4-mini from @mariozechner/pi-ai");
-}
-
-if (!OPENAI_MODEL) {
-  throw new Error("Could not resolve an OpenAI fallback model from @mariozechner/pi-ai");
-}
+const ANTHROPIC_MODEL: Model<Api> = getBuiltinModel("anthropic", "claude-haiku-4-5");
+const OPENAI_CODEX_MODEL: Model<Api> = getBuiltinModel("openai-codex", "gpt-5.4-mini");
+const OPENAI_MODEL: Model<Api> = getBuiltinModel("openai", "gpt-5.4-mini");
+const OPENROUTER_MODEL: Model<Api> = getBuiltinModel("openrouter", "openai/gpt-5.4-mini");
 
 export type SupportedImageMimeType = "image/png" | "image/jpeg" | "image/gif" | "image/webp";
 
-type OAuthAuthFileEntry = OAuthCredentials & { type?: string };
-type OAuthAuthFile = Record<string, OAuthAuthFileEntry>;
+// looseObject keeps unknown keys: the auth file belongs to Pi and may carry
+// fields this tool does not know about, and they must survive a write.
+const oAuthCredentialSchema = z.looseObject({
+  access: z.string(),
+  expires: z.number(),
+  refresh: z.string(),
+  type: z.literal("oauth"),
+});
+
+const apiKeyCredentialSchema = z.looseObject({
+  env: z.record(z.string(), z.string()).optional(),
+  key: z.string().optional(),
+  type: z.literal("api_key"),
+});
+
+const credentialSchema = z.union([oAuthCredentialSchema, apiKeyCredentialSchema]);
+const authFileSchema = z.record(z.string(), z.unknown());
+
+async function readAuthFile(): Promise<Record<string, Credential>> {
+  const authFile = Bun.file(PI_AUTH_FILE);
+  if (!(await authFile.exists())) {
+    return {};
+  }
+
+  const parsed = authFileSchema.safeParse(await authFile.json());
+  if (!parsed.success) {
+    return {};
+  }
+
+  const credentials: Record<string, Credential> = {};
+  for (const [providerId, entry] of Object.entries(parsed.data)) {
+    const credential = credentialSchema.safeParse(entry);
+    if (credential.success) {
+      credentials[providerId] = credential.data;
+    }
+  }
+
+  return credentials;
+}
+
+async function writeAuthFile(credentials: Record<string, Credential>): Promise<void> {
+  const tempPath = `${PI_AUTH_FILE}.tmp`;
+  // node:fs over Bun.write for the mode option: this file holds OAuth tokens
+  // and must stay readable only by the current user.
+  await writeFile(tempPath, `${JSON.stringify(credentials, null, 2)}\n`, { mode: 0o600 });
+  await rename(tempPath, PI_AUTH_FILE);
+}
+
+function createPiAuthFileCredentialStore(): CredentialStore {
+  // Serializes read-modify-write cycles per provider so a token refresh cannot
+  // overwrite a concurrent write. Pi's own store uses a cross-process file
+  // lock; a promise queue is enough for a single-process CLI.
+  const queues = new Map<string, Promise<void>>();
+
+  const enqueue = (providerId: string, operation: () => Promise<void>): Promise<void> => {
+    const previous = queues.get(providerId) ?? Promise.resolve();
+    const run = previous.then(operation);
+    queues.set(
+      providerId,
+      run.then(
+        () => undefined,
+        () => undefined
+      )
+    );
+    return run;
+  };
+
+  return {
+    async delete(providerId) {
+      await enqueue(providerId, async () => {
+        const credentials = await readAuthFile();
+        if (providerId in credentials) {
+          delete credentials[providerId];
+          await writeAuthFile(credentials);
+        }
+      });
+    },
+
+    async list() {
+      return Object.entries(await readAuthFile()).map(([providerId, credential]) => ({
+        providerId,
+        type: credential.type,
+      }));
+    },
+
+    async modify(providerId, fn) {
+      let result: Credential | undefined;
+      await enqueue(providerId, async () => {
+        const credentials = await readAuthFile();
+        result = await fn(credentials[providerId]);
+        if (result !== undefined) {
+          credentials[providerId] = result;
+          await writeAuthFile(credentials);
+        }
+      });
+      return result;
+    },
+
+    async read(providerId) {
+      return (await readAuthFile())[providerId];
+    },
+  };
+}
+
+const models = builtinModels({
+  authContext: defaultProviderAuthContext(),
+  credentials: createPiAuthFileCredentialStore(),
+});
 
 type ResolvedAuth = {
   apiKey?: string;
   model: Model<Api>;
 };
 
+type ResolveSuggestionAuthOptions = {
+  useClaudeApi?: boolean;
+};
+
 export type SuggestionAuth = ResolvedAuth;
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null;
-}
-
-function isOAuthAuthFileEntry(value: unknown): value is OAuthAuthFileEntry {
-  return (
-    isRecord(value) &&
-    typeof value.access === "string" &&
-    typeof value.refresh === "string" &&
-    typeof value.expires === "number"
-  );
-}
-
-async function loadPiAuthFile(): Promise<OAuthAuthFile | null> {
-  const authFile = Bun.file(PI_AUTH_FILE);
-  if (!(await authFile.exists())) {
+function resolveAnthropicAuth(useClaudeApi?: boolean): ResolvedAuth | null {
+  if (!useClaudeApi) {
     return null;
   }
 
-  const parsed = (await authFile.json()) as unknown;
-  if (!isRecord(parsed)) {
-    return null;
-  }
-
-  const auth: OAuthAuthFile = {};
-  for (const [provider, credentials] of Object.entries(parsed)) {
-    if (isOAuthAuthFileEntry(credentials)) {
-      auth[provider] = credentials;
-    }
-  }
-
-  return auth;
-}
-
-async function savePiAuthFile(auth: OAuthAuthFile): Promise<void> {
-  const tempPath = `${PI_AUTH_FILE}.tmp`;
-  await Bun.write(tempPath, `${JSON.stringify(auth, null, 2)}\n`);
-  await rename(tempPath, PI_AUTH_FILE);
-}
-
-async function resolvePiCodexAuth(): Promise<ResolvedAuth | null> {
-  const auth = await loadPiAuthFile();
-  const openAICodexCredentials = auth?.["openai-codex"];
-  if (!openAICodexCredentials) {
-    return null;
-  }
-
-  const refreshed = await getOAuthApiKey("openai-codex", auth);
-  if (!refreshed) {
-    return null;
-  }
-
-  const previousCredentials = auth["openai-codex"];
-  const nextCredentials = {
-    ...previousCredentials,
-    ...refreshed.newCredentials,
-  };
-
-  if (JSON.stringify(previousCredentials) !== JSON.stringify(nextCredentials)) {
-    auth["openai-codex"] = nextCredentials;
-    await savePiAuthFile(auth);
+  const anthropicApiKey = process.env.ANTHROPIC_API_KEY;
+  if (!anthropicApiKey) {
+    throw new Error("`--claude-api` requires ANTHROPIC_API_KEY to be set");
   }
 
   return {
-    apiKey: refreshed.apiKey,
-    model: OPENAI_CODEX_MODEL,
+    apiKey: anthropicApiKey,
+    model: ANTHROPIC_MODEL,
   };
 }
 
-export async function resolveSuggestionAuth(): Promise<SuggestionAuth> {
+export async function resolveSuggestionAuth(
+  options: ResolveSuggestionAuthOptions = {}
+): Promise<SuggestionAuth> {
+  const anthropicAuth = resolveAnthropicAuth(options.useClaudeApi);
+  if (anthropicAuth) {
+    return anthropicAuth;
+  }
+
   let piAuthError: string | null = null;
 
   try {
-    const piAuth = await resolvePiCodexAuth();
-    if (piAuth) {
-      return piAuth;
+    // Refreshes the OAuth token and persists it back to auth.json when needed.
+    const codexAuth = await models.getAuth("openai-codex");
+    if (codexAuth?.auth.apiKey) {
+      return {
+        apiKey: codexAuth.auth.apiKey,
+        model: OPENAI_CODEX_MODEL,
+      };
     }
   } catch (error) {
     piAuthError = error instanceof Error ? error.message : String(error);
@@ -150,6 +212,7 @@ export async function assertSuggestionAuthConfigured(): Promise<void> {
 }
 
 export const AUTHENTICATION_HELP_TEXT = `Authentication:
+  Override:  --claude-api (uses ANTHROPIC_API_KEY with Anthropic Claude Haiku 4.5)
   Preferred: Pi openai-codex auth from ~/.pi/agent/auth.json (GPT-5.4 mini)
   Fallback:  OPENROUTER_API_KEY (GPT-5.4 mini)
   Fallback:  OPENAI_API_KEY (GPT-5 mini fallback)`;
@@ -161,7 +224,7 @@ export async function suggestNameFromImage(
   authOverride?: SuggestionAuth
 ): Promise<string | null> {
   const auth = authOverride ?? (await resolveSuggestionAuth());
-  const response = await complete(
+  const response = await models.complete(
     auth.model,
     {
       messages: [

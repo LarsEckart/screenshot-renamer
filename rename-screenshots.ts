@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 
-const VERSION = "1.5.0";
+const VERSION = "1.6.2";
 
 import { appendFile, mkdir, readdir, rename, stat } from "node:fs/promises";
 import { homedir } from "node:os";
@@ -47,21 +47,14 @@ async function logRename(oldPath: string, newPath: string): Promise<void> {
   await appendFile(HISTORY_FILE, entry);
 }
 
-export function formatErrorMessage(error: unknown): string {
-  const message = error instanceof Error ? error.message : String(error);
+export function formatErrorMessage(cause: unknown): string {
+  const message = cause instanceof Error ? cause.message : String(cause);
   // Try to extract nested API error message from JSON
   const jsonMatch = message.match(/\{.*"message"\s*:\s*"([^"]+)".*\}/);
   if (jsonMatch?.[1]) {
     return jsonMatch[1];
   }
   return message;
-}
-
-async function getImageMediaType(ext: string): Promise<"image/png"> {
-  const types: Record<string, "image/png"> = {
-    ".png": "image/png",
-  };
-  return types[ext.toLowerCase()] || "image/png";
 }
 
 export function getUniqueFilename(
@@ -90,6 +83,8 @@ export async function mapWithConcurrency<T, U>(
     throw new Error(`Concurrency must be a positive integer, got ${concurrency}`);
   }
 
+  // SAFETY: every worker writes results[currentIndex] before finishing, and
+  // the workers together cover indices 0..items.length - 1, so no holes remain.
   const results = Array.from({ length: items.length }) as Array<U>;
   let nextIndex = 0;
 
@@ -149,10 +144,8 @@ async function suggestName(
   imagePath: string,
   suggestionAuth: SuggestionAuth
 ): Promise<string | null> {
-  const ext = extname(imagePath).toLowerCase();
   const imageData = await Bun.file(imagePath).arrayBuffer();
   const base64 = Buffer.from(imageData).toString("base64");
-  const mediaType = await getImageMediaType(ext);
 
   const suggestion = await suggestNameFromImage(
     `Analyze this screenshot and suggest a short, descriptive filename (without extension).
@@ -164,7 +157,7 @@ The name should be:
 
 Reply with ONLY the suggested filename, nothing else.`,
     base64,
-    mediaType,
+    "image/png",
     suggestionAuth
   );
 
@@ -338,6 +331,8 @@ if (import.meta.main) {
     }
   }
 
+  const useClaudeApi = args.includes("--claude-api");
+
   // Parse folder argument (first non-flag argument, excluding --days value)
   const flagsWithValues = new Set(["--days", "-d"]);
   const folderArg = args.find((arg, i) => {
@@ -379,7 +374,7 @@ ${AUTHENTICATION_HELP_TEXT}
   }
 
   try {
-    const suggestionAuth = await resolveSuggestionAuth();
+    const suggestionAuth = await resolveSuggestionAuth({ useClaudeApi });
 
     print(
       dryRun

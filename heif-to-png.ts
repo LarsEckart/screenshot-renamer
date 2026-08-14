@@ -6,6 +6,7 @@ import { createHash } from "node:crypto";
 import { mkdir, readdir, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, dirname, extname, join, resolve } from "node:path";
+import { z } from "zod";
 import { print, printError } from "./cli-output";
 
 const DEFAULT_INPUT_DIRECTORY = "~/Downloads";
@@ -28,20 +29,23 @@ type CliOptions = {
   overwrite: boolean;
 };
 
-type ConversionHistoryEntry = {
-  convertedAt: string;
-  outputPath: string;
-  sourceFilename: string;
-};
+const conversionHistoryEntrySchema = z.object({
+  convertedAt: z.string(),
+  outputPath: z.string(),
+  sourceFilename: z.string(),
+});
+
+const conversionHistorySchema = z.record(z.string(), conversionHistoryEntrySchema);
+
+type ConversionHistoryEntry = z.infer<typeof conversionHistoryEntrySchema>;
 
 type ConversionHistory = Record<string, ConversionHistoryEntry>;
 
 type ConvertFile = (inputPath: string, outputPath: string) => Promise<void>;
 
 export function isSupportedHeifFile(filename: string): boolean {
-  return SUPPORTED_EXTENSIONS.includes(
-    extname(filename).toLowerCase() as (typeof SUPPORTED_EXTENSIONS)[number]
-  );
+  const extension = extname(filename).toLowerCase();
+  return SUPPORTED_EXTENSIONS.some((supported) => supported === extension);
 }
 
 export function getPngFilenameForSource(sourcePath: string): string {
@@ -180,8 +184,8 @@ function parseCliArguments(args: Array<string>): CliOptions {
   };
 }
 
-function formatErrorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
+function formatErrorMessage(cause: unknown): string {
+  return cause instanceof Error ? cause.message : String(cause);
 }
 
 function assertMacOS(): void {
@@ -201,7 +205,8 @@ async function readDirectoryNames(directoryPath: string): Promise<Array<string>>
   try {
     return await readdir(directoryPath);
   } catch (error) {
-    if (typeof error === "object" && error !== null && "code" in error && error.code === "ENOENT") {
+    const cause: unknown = error;
+    if (cause instanceof Error && "code" in cause && cause.code === "ENOENT") {
       return [];
     }
 
@@ -220,12 +225,12 @@ async function loadHistory(): Promise<ConversionHistory> {
     return {};
   }
 
-  const parsed = JSON.parse(historyText);
-  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+  const parsed = conversionHistorySchema.safeParse(JSON.parse(historyText));
+  if (!parsed.success) {
     throw new Error(`Invalid history file: ${HISTORY_FILE}`);
   }
 
-  return parsed as ConversionHistory;
+  return parsed.data;
 }
 
 async function saveHistory(history: ConversionHistory): Promise<void> {
