@@ -15,9 +15,9 @@ const PI_AUTH_FILE = join(homedir(), ".pi", "agent", "auth.json");
 const FILENAME_SUGGESTION_SYSTEM_PROMPT =
   "You analyze images and suggest concise, descriptive filenames. Reply with only the filename, never extra commentary.";
 const ANTHROPIC_MODEL: Model<Api> = getBuiltinModel("anthropic", "claude-haiku-4-5");
-const OPENAI_CODEX_MODEL: Model<Api> = getBuiltinModel("openai-codex", "gpt-5.4-mini");
-const OPENAI_MODEL: Model<Api> = getBuiltinModel("openai", "gpt-5.4-mini");
-const OPENROUTER_MODEL: Model<Api> = getBuiltinModel("openrouter", "openai/gpt-5.4-mini");
+const OPENAI_CODEX_MODEL: Model<Api> = getBuiltinModel("openai-codex", "gpt-5.6-luna");
+const OPENAI_MODEL: Model<Api> = getBuiltinModel("openai", "gpt-5.6-luna");
+const OPENROUTER_MODEL: Model<Api> = getBuiltinModel("openrouter", "openai/gpt-5.6-luna");
 
 export type SupportedImageMimeType = "image/png" | "image/jpeg" | "image/gif" | "image/webp";
 
@@ -213,9 +213,9 @@ export async function assertSuggestionAuthConfigured(): Promise<void> {
 
 export const AUTHENTICATION_HELP_TEXT = `Authentication:
   Override:  --claude-api (uses ANTHROPIC_API_KEY with Anthropic Claude Haiku 4.5)
-  Preferred: Pi openai-codex auth from ~/.pi/agent/auth.json (GPT-5.4 mini)
-  Fallback:  OPENROUTER_API_KEY (GPT-5.4 mini)
-  Fallback:  OPENAI_API_KEY (GPT-5 mini fallback)`;
+  Preferred: Pi openai-codex auth from ~/.pi/agent/auth.json (GPT-5.6 Luna)
+  Fallback:  OPENROUTER_API_KEY (GPT-5.6 Luna)
+  Fallback:  OPENAI_API_KEY (GPT-5.6 Luna)`;
 
 export async function suggestNameFromImage(
   prompt: string,
