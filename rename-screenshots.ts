@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 
-const VERSION = "1.7.0";
+const VERSION = "1.7.1";
 
 import { appendFile, mkdir, readdir, rename, stat } from "node:fs/promises";
 import { homedir } from "node:os";

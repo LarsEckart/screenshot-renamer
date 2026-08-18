@@ -8,8 +8,11 @@ import {
   type CredentialStore,
   type Model,
 } from "@earendil-works/pi-ai";
+import { registerBunOAuthFlows } from "@earendil-works/pi-ai/bun-oauth";
 import { builtinModels, getBuiltinModel } from "@earendil-works/pi-ai/providers/all";
 import { z } from "zod";
+
+registerBunOAuthFlows();
 
 const PI_AUTH_FILE = join(homedir(), ".pi", "agent", "auth.json");
 const FILENAME_SUGGESTION_SYSTEM_PROMPT =
