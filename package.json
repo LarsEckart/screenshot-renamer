@@ -3,6 +3,8 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "build": "bun build --compile rename-screenshots.ts --outfile dist/screenshot-renamer && bun build --compile heif-to-png.ts --outfile dist/heif-to-png && bun build --compile image-renamer.ts --outfile dist/image-renamer",
+    "install:local": "bun run build && cp dist/screenshot-renamer dist/heif-to-png dist/image-renamer ~/.local/bin/",
     "lint": "oxlint .",
     "lint:fix": "oxlint --fix ."
   },
